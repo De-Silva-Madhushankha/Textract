@@ -5,6 +5,7 @@ import uuid
 from functools import lru_cache
 from fastapi import (
     FastAPI,
+    Header,
     HTTPException,
     Depends,
     Request,
@@ -17,8 +18,11 @@ from PIL import Image
 import pytesseract
 
 class Settings(BaseSettings):
+    app_auth_token: str
     debug: bool = False
     echo_active: bool = True
+    app_auth_token_prod: str = None
+    skip_auth: bool = False
 
     model_config = {
         "env_file": ".env",}
@@ -44,9 +48,24 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 def home_view(request: Request, settings:Settings = Depends(get_settings)):
     return templates.TemplateResponse({"request": request}, "home.html",{ "developer": "MadhushankhaDeS", })
 
-@app.post("/")
-async def prediction_view(file:UploadFile = File(...), settings:Settings = Depends(get_settings)):
+def verify_auth(authorization = Header(None), settings:Settings = Depends(get_settings)):
+    """
+    Authorization: Bearer <token>
+    {"authorization": "Bearer <token>"}
+    """
+    if settings.debug and settings.skip_auth:
+        return
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Authorization header missing")
+    label, token = authorization.split()
+    if token != settings.app_auth_token:
+        raise HTTPException(status_code=401, detail="Invalid authorization token")
 
+
+@app.post("/")
+async def prediction_view(file:UploadFile = File(...), authorization = Header(None), settings:Settings = Depends(get_settings)):
+
+    verify_auth(authorization, settings)
     bytes_str = io.BytesIO(await file.read())
     try:
         img = Image.open(bytes_str)
